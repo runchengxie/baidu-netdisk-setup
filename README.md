@@ -20,3 +20,7 @@ python -m unittest discover -s tests
 ```
 
 测试记录的公开摘要见 [docs/verification.md](docs/verification.md)。个人网盘目录、文件 ID、授权文件和实际测试状态保留在本机数据目录中。
+
+## 自动刷新与断点续传
+
+这两项目前还没有接入本项目。自动刷新需要所属应用的 SecretKey 和刷新令牌；本指南的体验授权文件不能直接满足这些条件。断点续传已经在独立的官方 API 测试中验证过，仍需把任务状态保存和恢复接入 MCP。具体条件及建议见 [refresh-and-resume.md](docs/refresh-and-resume.md)。
