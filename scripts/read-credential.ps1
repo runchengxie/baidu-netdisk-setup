@@ -1,6 +1,9 @@
-param([Parameter(Mandatory)][string]$TokenFile, [ValidateSet('token', 'status')][string]$Mode = 'status', [switch]$Online)
+param([string]$TokenFile, [ValidateSet('token', 'status')][string]$Mode = 'status', [switch]$Online, [string]$SettingsFile=(Join-Path $PSScriptRoot 'settings.json'))
 $ErrorActionPreference = 'Stop'
 try {
+    . (Join-Path $PSScriptRoot 'config.ps1')
+    $settings=Get-BaiduMcpSettings -SettingsFile $SettingsFile
+    if (-not $TokenFile) { $TokenFile=$settings.tokenFile }
     $saved = Get-Content -Raw -LiteralPath $TokenFile | ConvertFrom-Json
     $state = 'unknown'
     $expires = $null
@@ -23,6 +26,8 @@ try {
             [Console]::Out.Write($token)
         } else {
             $result = [ordered]@{ status = $state; expiresAtUtc = $(if ($expires) { $expires.UtcDateTime.ToString('o') } else { $null }); hasRefreshToken = [bool]$saved.refresh_token; automaticRefresh = $false; decryptable = $true }
+            $refresh=Get-BaiduRefreshStatus -Settings $settings -HasRefreshToken ([bool]$saved.refresh_token)
+            foreach($key in $refresh.Keys) { $result[$key]=$refresh[$key] }
             if ($Online) {
                 $query = 'https://pan.baidu.com/rest/2.0/xpan/nas?method=uinfo&access_token=' + [Uri]::EscapeDataString($token)
                 try { $response = Invoke-RestMethod -Uri $query -TimeoutSec 25; $result.onlineErrno = $response.errno; $result.onlineValid = ($response.errno -eq 0) }

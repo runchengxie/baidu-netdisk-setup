@@ -3,6 +3,7 @@ param(
     [string]$DataRoot,
     [string]$ConfigRoot,
     [string]$TokenFile,
+    [string]$EnvFile,
     [switch]$SkipDependencies,
     [switch]$SkipRegistration
 )
@@ -27,7 +28,11 @@ $powershell = (Get-Command pwsh -ErrorAction Stop).Source
 if (-not $SkipRegistration) { $codex = (Get-Command codex -ErrorAction Stop).Source }
 New-Item -ItemType Directory -Force -Path $deployment,$runtime | Out-Null
 $settingsPath = Join-Path $deployment 'settings.json'
-if (-not $TokenFile -and (Test-Path -LiteralPath $settingsPath)) { $TokenFile = (Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json).tokenFile }
+. (Join-Path $PSScriptRoot 'config.ps1')
+$existing=Get-BaiduMcpSettings -SettingsFile $settingsPath -EnvFile $EnvFile
+$EnvFile=$existing.envFile
+Assert-BaiduPrivatePath -Path $EnvFile
+if (-not $TokenFile) { $TokenFile=$existing.tokenFile }
 if (-not $TokenFile) { $TokenFile = Join-Path $deployment 'experience-token.json' }
 $TokenFile = [IO.Path]::GetFullPath($TokenFile)
 if (-not $SkipDependencies) {
@@ -48,10 +53,17 @@ if ($LASTEXITCODE -ne 0 -or $head -ne $revision) { throw 'The official checkout 
 $python = Join-Path $officialDir '.venv/Scripts/python.exe'
 $bridge = Join-Path $runtime 'node_modules/mcp-remote/dist/proxy.js'
 if (-not (Test-Path -LiteralPath $python) -or -not (Test-Path -LiteralPath $bridge)) { throw 'Runtime dependencies are missing' }
-foreach ($name in @('policy.py','read-credential.ps1','check-authorization.ps1','save-experience-authorization.ps1','start-remote.mjs','start-local.py','check-mcp.py')) {
+foreach ($name in @('policy.py','config.ps1','load-settings.ps1','save-app-secret.ps1','read-credential.ps1','check-authorization.ps1','save-experience-authorization.ps1','start-remote.mjs','start-local.py','check-mcp.py')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $deployment $name)
 }
-[ordered]@{ tokenFile=$TokenFile; powershell=$powershell; bridge=$bridge; officialDir=$officialDir; dataRoot=$DataRoot; configRoot=$ConfigRoot } | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding utf8
+if (-not (Test-Path -LiteralPath $EnvFile)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvFile) | Out-Null
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) '.env.example') -Destination $EnvFile
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls $EnvFile /inheritance:r /grant:r "$($identity):(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot restrict env file permissions' }
+}
+[ordered]@{ tokenFile=$TokenFile; envFile=$EnvFile; powershell=$powershell; bridge=$bridge; officialDir=$officialDir; dataRoot=$DataRoot; configRoot=$ConfigRoot } | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding utf8
 if (-not $SkipRegistration) {
     & $codex mcp add baidu-netdisk -- $node (Join-Path $deployment 'start-remote.mjs')
     if ($LASTEXITCODE -ne 0) { throw 'Remote MCP registration failed' }

@@ -12,8 +12,14 @@ from policy import expiry_status, redact, remote_target, upload_policy
 
 def main():
     here = Path(__file__).resolve().parent
-    settings = json.loads((here / 'settings.json').read_text(encoding='utf-8-sig'))
-    token_file = os.environ.get('BAIDU_MCP_TOKEN_FILE', settings['tokenFile'])
+    base = json.loads((here / 'settings.json').read_text(encoding='utf-8-sig'))
+    loaded = subprocess.run([base['powershell'], '-NoProfile', '-NonInteractive', '-File',
+                             str(here / 'load-settings.ps1')], capture_output=True, text=True,
+                            encoding='utf-8', timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+    if loaded.returncode:
+        raise RuntimeError('Configuration unavailable')
+    settings = json.loads(loaded.stdout)
+    token_file = settings['tokenFile']
     metadata = json.loads(Path(token_file).read_text(encoding='utf-8-sig'))
     state = expiry_status(metadata)
     if state['status'] == 'expired':

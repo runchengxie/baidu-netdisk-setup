@@ -135,6 +135,40 @@ $python = Join-Path $settings.officialDir '.venv/Scripts/python.exe'
 
 `codex mcp get baidu-netdisk` 显示 `enabled: true` 只能证明配置已登记；真正是否可用，要看上面的连接检查和实际只读请求。
 
+## 私人 .env 和应用密钥
+
+安装脚本会在 `$deployment` 中创建 `.env`，已有文件会保留。公开仓库只放 [.env.example](.env.example) 模板，真实配置和加密密钥文件放在仓库外。
+
+打开自己的配置文件。
+
+```powershell
+notepad (Join-Path $deployment '.env')
+```
+
+三个配置项分别是 `BAIDU_MCP_TOKEN_FILE`、`BAIDU_MCP_APP_KEY` 和 `BAIDU_MCP_SECRET_FILE`。令牌与密钥填写文件路径，AppKey 是应用标识，不能把 SecretKey 或 Access Token 的明文写进这个文件。
+
+```dotenv
+# 路径只作填写示例，请替换成自己的文件位置。
+BAIDU_MCP_TOKEN_FILE="C:/private-config/authorization.json"
+BAIDU_MCP_APP_KEY=自己的应用AppKey
+BAIDU_MCP_SECRET_FILE="C:/private-config/app-secret.json"
+```
+
+空值保留 `settings.json` 的默认值，普通体验用户可保持三个配置项为空。相对文件路径按 `.env` 所在目录解析。支持整行注释和成对引号，不支持变量展开、行尾注释或执行命令；未知配置项会报错，不会打印配置值。
+
+两个 MCP 使用同一套读取逻辑，优先级是进程环境变量、`.env`、`settings.json`。修改后重启两个 MCP。若需要指定其他私人配置文件，在安装时传入 `-EnvFile`，或者在启动进程中设置 `BAIDU_MCP_ENV_FILE`。安装的 `-TokenFile` 参数设置默认值，已有环境变量或 `.env` 中的非空值仍优先。
+
+如果你持有原应用的 SecretKey，先填写正确的 AppKey，再运行下面这一整行，在隐藏提示里自行输入密钥。
+
+```powershell
+& (Join-Path $deployment 'save-app-secret.ps1')
+& (Join-Path $deployment 'check-authorization.ps1')
+```
+
+默认保存到配置目录的 `app-secret.json`，使用当前 Windows 用户加密并限制文件权限。已有文件若属于另一个应用，脚本会停止。不要运行脚本向 Git 仓库里保存密钥。
+
+检查结果中的 `refreshConfigurationStatus` 会说明缺少刷新令牌、AppKey、密钥文件，或文件不能解密等情况。`ready_not_implemented` 只表示材料已准备，`automaticRefresh` 仍为 `false`。这一步尚未自动刷新令牌，也没有向百度验证 SecretKey 是否正确。
+
 ## 平时怎么使用
 
 > 查看百度网盘某个目录的所有文件，逐页读取。

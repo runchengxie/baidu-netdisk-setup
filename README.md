@@ -8,6 +8,7 @@
 
 - 安装远程 MCP 所需的桥接工具，并登记本地上传 MCP。
 - 用 Windows 当前用户加密保存授权，配置文件中不放明文令牌。
+- 私人 `.env` 配置令牌文件、AppKey 和加密密钥文件路径，公开的 `.env.example` 提供填写说明。
 - 查询授权有效期，临近到期时提示人工重新授权。
 - 上传默认拒绝已有同名文件，只有明确设置 `overwrite=true` 才允许替换。
 
@@ -24,3 +25,5 @@ python -m unittest discover -s tests
 ## 自动刷新与断点续传
 
 这两项目前还没有接入本项目。自动刷新需要所属应用的 SecretKey 和刷新令牌；本指南的体验授权文件不能直接满足这些条件。断点续传已经在独立的官方 API 测试中验证过，仍需把任务状态保存和恢复接入 MCP。具体条件及建议见 [refresh-and-resume.md](docs/refresh-and-resume.md)。
+
+`save-app-secret.ps1` 可在本机隐藏输入并加密保存 SecretKey，授权检查会报告刷新材料是否齐全。该配置入口尚不会执行刷新请求。
