@@ -35,7 +35,14 @@ codex --version
 
 本指南需要和本项目的 `scripts` 文件夹一起使用。单独复制这一个 Markdown 文件不会自动安装启动程序。
 
-取得整个项目目录后，把它放到自己的 `code/baidu-netdisk-setup`。当前项目还没有公开发布，不能用一个尚不存在的 GitHub 地址下载。将来公开时，可下载完整 ZIP 或克隆仓库，下面的命令无需改变。
+从[公开仓库](https://github.com/runchengxie/baidu-netdisk-setup)下载完整 ZIP，或者在 PowerShell 运行下面两行。项目放在自己的 `code/baidu-netdisk-setup`。
+
+```powershell
+New-Item -ItemType Directory -Force -Path (Join-Path $env:USERPROFILE 'code') | Out-Null
+git clone https://github.com/runchengxie/baidu-netdisk-setup.git (Join-Path $env:USERPROFILE 'code/baidu-netdisk-setup')
+```
+
+如果该位置已经有项目，直接进入现有目录，不要再次克隆到同一个位置。
 
 ```powershell
 $project = Join-Path $env:USERPROFILE 'code/baidu-netdisk-setup'
@@ -160,7 +167,7 @@ $python = Join-Path $settings.officialDir '.venv/Scripts/python.exe'
 
 体验路线重新做第三步和第四步，会更新同一份授权文件。然后重启 Codex 的两个 MCP 连接。
 
-体验流程得到的是访问令牌，本项目不持有体验应用的 SecretKey。正式应用如要自动刷新，需要自己的应用密钥和刷新令牌，另行配置安全的刷新流程，不能拿别人的 SecretKey 来替代。
+本指南的体验流程目前只保存访问令牌，本项目不持有体验应用的 SecretKey。正式应用如要自动刷新，需要该应用的 SecretKey 和刷新令牌，另行配置安全的刷新流程。详细条件和断点续传方案见 [自动刷新与续传说明](docs/refresh-and-resume.md)。
 
 已经有自己应用的加密授权文件，也可在安装时指定 `-TokenFile`。文件需使用本项目兼容的 Windows 加密字段格式，包含 `access_token`、`saved_at_utc` 和 `expires_in`；普通明文令牌 JSON 不能直接使用。
 
