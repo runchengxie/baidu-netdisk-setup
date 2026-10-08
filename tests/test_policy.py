@@ -25,6 +25,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_target(self):
         self.assertEqual(remote_target('/资料/', 'a.txt'), '/资料/a.txt')
+        self.assertEqual(remote_target('/', 'a.txt'), '/a.txt')
         for directory in ('relative', '/a/../b', '/a//b'):
             with self.assertRaises(ValueError): remote_target(directory, 'a.txt')
 
