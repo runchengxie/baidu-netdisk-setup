@@ -1,0 +1,10 @@
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.env*
+*token*.json
+settings.json
+runtime/
+test-results/
