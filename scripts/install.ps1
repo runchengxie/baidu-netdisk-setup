@@ -3,7 +3,8 @@ param(
     [string]$DataRoot,
     [string]$ConfigRoot,
     [string]$TokenFile,
-    [switch]$SkipDependencies
+    [switch]$SkipDependencies,
+    [switch]$SkipRegistration
 )
 $ErrorActionPreference = 'Stop'
 # Accept this workspace's three simple root keys; no general TOML parsing is implied.
@@ -23,7 +24,7 @@ $officialDir = Join-Path $official 'src/baidu-netdisk'
 $revision = 'b3983d330fea79c7b72e6b7014803e1830148d2c'
 $node = (Get-Command node -ErrorAction Stop).Source
 $powershell = (Get-Command pwsh -ErrorAction Stop).Source
-$codex = (Get-Command codex -ErrorAction Stop).Source
+if (-not $SkipRegistration) { $codex = (Get-Command codex -ErrorAction Stop).Source }
 New-Item -ItemType Directory -Force -Path $deployment,$runtime | Out-Null
 $settingsPath = Join-Path $deployment 'settings.json'
 if (-not $TokenFile -and (Test-Path -LiteralPath $settingsPath)) { $TokenFile = (Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json).tokenFile }
@@ -51,8 +52,12 @@ foreach ($name in @('policy.py','read-credential.ps1','check-authorization.ps1',
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $deployment $name)
 }
 [ordered]@{ tokenFile=$TokenFile; powershell=$powershell; bridge=$bridge; officialDir=$officialDir; dataRoot=$DataRoot; configRoot=$ConfigRoot } | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding utf8
-& $codex mcp add baidu-netdisk -- $node (Join-Path $deployment 'start-remote.mjs')
-if ($LASTEXITCODE -ne 0) { throw 'Remote MCP registration failed' }
-& $codex mcp add baidu-netdisk-local-uploader -- $python (Join-Path $deployment 'start-local.py')
-if ($LASTEXITCODE -ne 0) { throw 'Local MCP registration failed' }
-Write-Host 'Registered remote and local-upload MCPs. Save authorization if needed, run check-authorization.ps1 -Online, then restart Codex.'
+if (-not $SkipRegistration) {
+    & $codex mcp add baidu-netdisk -- $node (Join-Path $deployment 'start-remote.mjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Remote MCP registration failed' }
+    & $codex mcp add baidu-netdisk-local-uploader -- $python (Join-Path $deployment 'start-local.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Local MCP registration failed' }
+    Write-Host 'Registered remote and local-upload MCPs. Save authorization if needed, run check-authorization.ps1 -Online, then restart Codex.'
+} else {
+    Write-Host 'Installed runtime and launchers without changing Codex registration.'
+}
