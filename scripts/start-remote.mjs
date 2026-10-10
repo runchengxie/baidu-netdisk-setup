@@ -83,12 +83,14 @@ try {
     polling=true;
     try {
       current=await ensure();
+      if (stopping) return;
       nextCheck=Date.now()+(['failed','unavailable'].includes(current.refreshAction)?3600000:86400000);
       if (current.revision!==revision) {
         revision=current.revision; relay.rotate();
         console.error('Baidu authorization updated; reconnecting the remote MCP.');
       } else relay.resume();
     } catch (error) {
+      if (stopping) return;
       console.error('Baidu authorization check failed; restart or reauthorize if expired.');
       if (error.code==='authorization_expired') stop(1);
       else {nextCheck=Date.now()+3600000; relay.resume();}

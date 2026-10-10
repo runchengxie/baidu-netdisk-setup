@@ -43,7 +43,7 @@ function Save-BaiduRefreshedAuthorization {
     $data | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent().Name
     & icacls $temporary /inheritance:r /grant:r "$($identity):(F)" | Out-Null
-    if ($LASTEXITCODE -ne 0) { Remove-Item -LiteralPath $temporary; throw 'Cannot restrict permissions' }
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot restrict permissions; encrypted pending credentials retained' }
     # File.Move with overwrite is an atomic same-volume rename on this Windows
     # runtime. Retain the encrypted pending file if the final replacement fails:
     # the server may already have rotated its refresh token.

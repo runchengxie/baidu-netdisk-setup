@@ -12,6 +12,19 @@ from authorization import AuthorizationProvider, install_log_redaction
 
 
 class ProviderTests(unittest.TestCase):
+    def test_known_expired_cached_token_is_not_usable_during_retry_backoff(self):
+        states = iter([{'status':'valid','refreshAction':'not_due'}, {'status':'expired','refreshAction':'failed'}])
+        def execute(command, **kwargs):
+            text = 'old-artificial-token' if command[-1] == 'token' else json.dumps(next(states))
+            return subprocess.CompletedProcess(command, 0, text, '')
+        with patch('authorization.subprocess.run', side_effect=execute):
+            provider = AuthorizationProvider(Path('private'), {'powershell':'pwsh','tokenFile':'private/token.json'})
+            with self.assertRaises(RuntimeError):
+                provider.check()
+            with self.assertRaises(RuntimeError):
+                with provider.lease():
+                    self.fail('Expired token was leased')
+
     def test_daily_deadline_checks_and_reloads_authorization(self):
         values = iter(['old-artificial-token', 'new-artificial-token'])
         def execute(command, **kwargs):

@@ -110,6 +110,17 @@ Invoke-BaiduEnsureAuthorization -Settings $s -Request {throw 'Must not exchange 
 """)
         self.assertEqual(result['refreshFailure'], 'pending_credentials_recovery_required')
 
+    def test_permission_failure_keeps_rotated_credentials_encrypted_for_recovery(self):
+        result = self.run_case("""
+function icacls { $global:LASTEXITCODE=1 }
+$result=Invoke-BaiduEnsureAuthorization -Settings $s -Request {@{access_token='fake-new-access';refresh_token='fake-new-refresh';expires_in=2592000}}
+$pending=$s.tokenFile+'.pending-refresh.json'
+@{result=$result;pendingExists=(Test-Path $pending);unchanged=([IO.File]::ReadAllText($s.tokenFile) -eq $before)}|ConvertTo-Json -Depth 4 -Compress
+""")
+        self.assertEqual(result['result']['refreshFailure'], 'credential_save_failed')
+        self.assertTrue(result['pendingExists'])
+        self.assertTrue(result['unchanged'])
+
     def test_two_processes_exchange_only_once(self):
         result = self.run_case("""
 $childScript=Join-Path $env:REFRESH_ROOT 'child.ps1'

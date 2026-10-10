@@ -35,6 +35,7 @@ class AuthorizationProvider:
         self.stop = threading.Event()
         self.tokens = set()
         self.token = None
+        self.usable = False
         self.next_check = 0
         self.stamp = None
         self.check()
@@ -58,6 +59,7 @@ class AuthorizationProvider:
         with self.lock:
             state = json.loads(self.run('ensure-authorization.ps1'))
             if state['status'] in ('expired', 'unknown'):
+                self.usable = False
                 raise RuntimeError('Authorization expired or unavailable; reauthorize')
             # Another MCP can replace the file between decrypting and recording
             # its timestamp. Only accept a read whose before/after stamps agree.
@@ -73,6 +75,7 @@ class AuthorizationProvider:
             else:
                 raise RuntimeError('Authorization changed repeatedly while reading')
             self.token = token
+            self.usable = True
             os.environ['BAIDU_NETDISK_ACCESS_TOKEN'] = token
             self.stamp = after
             failed = state.get('refreshAction') in ('failed', 'unavailable')
@@ -87,6 +90,8 @@ class AuthorizationProvider:
         with self.lock:
             if time.monotonic() >= self.next_check or self.file_stamp() != self.stamp:
                 self.check()
+            if not self.usable:
+                raise RuntimeError('Authorization expired or unavailable; reauthorize')
             yield self.token
 
     def redact(self, text):
