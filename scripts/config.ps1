@@ -67,7 +67,7 @@ function Get-BaiduMcpSettings {
 
 function Get-BaiduRefreshStatus {
     param([hashtable]$Settings, [bool]$HasRefreshToken)
-    $reason='ready_not_implemented'; $decryptable=$false
+    $reason='ready'; $decryptable=$false
     if (-not $HasRefreshToken) { $reason='missing_refresh_token' }
     elseif (-not $Settings.appKey) { $reason='missing_app_key' }
     elseif (-not (Test-Path -LiteralPath $Settings.secretFile)) { $reason='missing_secret_file' }
@@ -82,7 +82,7 @@ function Get-BaiduRefreshStatus {
             }
         } catch { $reason='secret_unreadable' }
     }
-    return @{ refreshMaterialsReady=($reason -eq 'ready_not_implemented'); refreshConfigurationStatus=$reason; secretDecryptable=$decryptable; automaticRefresh=$false }
+    return @{ refreshMaterialsReady=($reason -eq 'ready'); refreshConfigurationStatus=$reason; secretDecryptable=$decryptable; automaticRefresh=($reason -eq 'ready') }
 }
 
 function Save-BaiduAppSecret {

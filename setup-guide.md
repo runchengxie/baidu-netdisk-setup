@@ -167,7 +167,18 @@ BAIDU_MCP_SECRET_FILE="C:/private-config/app-secret.json"
 
 默认保存到配置目录的 `app-secret.json`，使用当前 Windows 用户加密并限制文件权限。已有文件若属于另一个应用，脚本会停止。不要运行脚本向 Git 仓库里保存密钥。
 
-检查结果中的 `refreshConfigurationStatus` 会说明缺少刷新令牌、AppKey、密钥文件，或文件不能解密等情况。`ready_not_implemented` 只表示材料已准备，`automaticRefresh` 仍为 `false`。这一步尚未自动刷新令牌，也没有向百度验证 SecretKey 是否正确。
+检查结果中的 `refreshConfigurationStatus` 会说明缺少刷新令牌、AppKey、密钥文件，或文件不能解密等情况。`ready` 与 `automaticRefresh: true` 表示已配置刷新材料；这个检查本身不向百度验证 SecretKey。保存后重启两个 MCP，启动程序会在临近到期时刷新。
+
+注意：安装后的 MCP 读取部署目录里的 `.env`，不会自动读取 `code/baidu-netdisk-setup/.env`。`BAIDU_MCP_SECRET_FILE` 填的是加密文件的路径，不是 SecretKey 的内容。密钥本身请通过上面的隐藏输入保存。
+
+如果想现在就验证一次，无需等到令牌过期，可以运行：
+
+```powershell
+& (Join-Path $deployment 'ensure-authorization.ps1') -Force
+& (Join-Path $deployment 'check-authorization.ps1') -Online
+```
+
+`refreshAction: refreshed` 表示百度已返回新令牌且已加密保存。`not_due` 表示当前无需刷新，或另一个进程刚刚完成刷新。只有自己应用的完整授权材料才能完成这个流程；体验用户不用运行 `-Force`。
 
 ## 平时怎么使用
 
@@ -197,11 +208,11 @@ BAIDU_MCP_SECRET_FILE="C:/private-config/app-secret.json"
 
 ## 授权到期后怎么办
 
-启动工具会检查保存的有效期，到期前七天提示，到期后要求重新授权。工具尚未自动刷新令牌，也没有后台定时提醒。
+两个 MCP 都会在启动时检查有效期，长期运行时每天检查一次。剩余有效期不超过七天且材料齐全时，会自动刷新；检查失败会在约一小时后再试。工具未运行或电脑关机时没有独立定时任务，下次启动再检查。
 
 体验路线重新做第三步和第四步，会更新同一份授权文件。然后重启 Codex 的两个 MCP 连接。
 
-本指南的体验流程目前只保存访问令牌，本项目不持有体验应用的 SecretKey。正式应用如要自动刷新，需要该应用的 SecretKey 和刷新令牌，另行配置安全的刷新流程。详细条件和断点续传方案见 [自动刷新与续传说明](docs/refresh-and-resume.md)。
+本指南的体验流程目前只保存访问令牌，本项目不持有体验应用的 SecretKey，因此体验用户到期后仍需重新授权。自己应用的授权可以按上面的步骤配置自动刷新。刷新失败时，工具保留现有授权；授权被撤销、刷新令牌失效或密钥不匹配时，仍需要你处理。详细行为和断点续传方案见 [自动刷新与续传说明](docs/refresh-and-resume.md)。
 
 已经有自己应用的加密授权文件，也可在安装时指定 `-TokenFile`。文件需使用本项目兼容的 Windows 加密字段格式，包含 `access_token`、`saved_at_utc` 和 `expires_in`；普通明文令牌 JSON 不能直接使用。
 

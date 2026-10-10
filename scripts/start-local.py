@@ -7,7 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from policy import expiry_status, redact, remote_target, upload_policy
+from policy import redact, remote_target, upload_policy
+from authorization import AuthorizationProvider, install_log_redaction
 
 
 def main():
@@ -19,29 +20,16 @@ def main():
     if loaded.returncode:
         raise RuntimeError('Configuration unavailable')
     settings = json.loads(loaded.stdout)
-    token_file = settings['tokenFile']
-    metadata = json.loads(Path(token_file).read_text(encoding='utf-8-sig'))
-    state = expiry_status(metadata)
-    if state['status'] == 'expired':
-        raise RuntimeError('Expired authorization')
-    child = subprocess.run([settings['powershell'], '-NoProfile', '-NonInteractive', '-File',
-                            str(here / 'read-credential.ps1'), '-TokenFile', token_file, '-Mode', 'token'],
-                           capture_output=True, text=True, timeout=15,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
-    token = child.stdout.strip()
-    if child.returncode or not token:
-        raise RuntimeError('Authorization unavailable')
-    os.environ['BAIDU_NETDISK_ACCESS_TOKEN'] = token
+    authorization = AuthorizationProvider(here, settings)
+    install_log_redaction(authorization)
 
     class SafeStream:
         def __init__(self, stream): self.stream = stream
-        def write(self, text): return self.stream.write(redact(text, token))
+        def write(self, text): return self.stream.write(authorization.redact(text))
         def flush(self): return self.stream.flush()
         def __getattr__(self, name): return getattr(self.stream, name)
 
     sys.stderr = SafeStream(sys.stderr)
-    if state['status'] == 'expiring':
-        print('Baidu authorization expires within 7 days. Reauthorize soon.', file=sys.stderr)
     upstream = Path(settings['officialDir']) / 'fileupload_tool.py'
     spec = importlib.util.spec_from_file_location('official_baidu_upload', upstream)
     official = importlib.util.module_from_spec(spec)
@@ -64,6 +52,13 @@ def main():
         Default rejects an existing filename. Set overwrite=true only with explicit user permission.
         No persisted resume state; interrupted uploads cannot be resumed by this tool.
         """
+        try:
+            with authorization.lease() as token:
+                return perform_upload(local_file_path, remote_directory, overwrite, token)
+        except Exception:
+            return {'status': 'error', 'message': 'Authorization unavailable. Check refresh configuration or reauthorize.'}
+
+    def perform_upload(local_file_path, remote_directory, overwrite, token):
         try:
             local = Path(local_file_path)
             target = remote_target(remote_directory, local.name)
@@ -104,7 +99,9 @@ def main():
         except Exception:
             return {'status': 'error', 'message': 'Upload failed. Check authorization, destination and network; no sensitive diagnostic is returned.'}
 
-    mcp.run(transport='stdio')
+    authorization.start_monitor()
+    try: mcp.run(transport='stdio')
+    finally: authorization.stop.set()
 
 
 if __name__ == '__main__':
