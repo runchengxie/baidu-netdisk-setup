@@ -55,7 +55,7 @@ class EnvTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             value = json.loads(result.stdout)
             self.assertTrue(value['ready']['refreshMaterialsReady'])
-            self.assertFalse(value['ready']['automaticRefresh'])
+            self.assertTrue(value['ready']['automaticRefresh'])
             self.assertEqual(value['mismatch']['refreshConfigurationStatus'], 'app_key_mismatch')
             self.assertNotIn('artificial-unit-secret', path.read_text(encoding='utf-8-sig'))
 
