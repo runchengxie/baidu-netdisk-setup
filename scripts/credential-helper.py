@@ -10,6 +10,7 @@ import warnings
 import secrets
 
 from linux_config import load_settings
+from linux_app_authorization import AuthorizationFailure
 from linux_authorization import (
     ensure_authorization,
     read_token,
@@ -139,6 +140,12 @@ def main(argv=None):
             save_application_secret(settings, secret, replace=args.replace)
             print("Application secret saved privately.")
         return 0
+    except AuthorizationFailure as failure:
+        print(
+            f"Baidu application authorization failed [{failure.phase}/{failure.code}]: {failure}",
+            file=sys.stderr,
+        )
+        return 1
     except Exception:
         print(
             "Baidu Linux authorization helper failed. Check private paths, permissions, settings and authorization.",

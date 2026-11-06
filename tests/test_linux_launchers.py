@@ -32,6 +32,7 @@ class RemoteLinuxTests(unittest.TestCase):
             "credential-helper.py",
             "linux_config.py",
             "linux_authorization.py",
+            "linux_app_authorization.py",
         ):
             shutil.copyfile(source / name, self.root / name)
         bridge = self.root / "fake-bridge.mjs"

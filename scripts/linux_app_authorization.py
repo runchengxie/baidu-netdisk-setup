@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+import json
+import urllib.error
 import urllib.parse
 
 from linux_config import (
@@ -12,6 +14,78 @@ from linux_config import (
     fsync_directory,
 )
 from linux_authorization import expiry, refresh_lock, request_refresh
+
+
+_ERROR_MESSAGES = {
+    "invalid_code": "The code is empty or has an invalid format. Copy the fresh code shown on the OOB page.",
+    "unexpected_result_url": "The result URL is not the supported official callback. Copy the displayed OOB code instead.",
+    "authorization_state_missing": "The result URL has no state. Copy the displayed OOB code instead.",
+    "authorization_state_mismatch": "The result belongs to another authorization request. Use the current run and its new link.",
+    "secret_required": "Enter the original application SecretKey without surrounding whitespace.",
+    "invalid_client": "Baidu rejected the application credentials. Check that SecretKey belongs to the configured AppKey.",
+    "invalid_grant": "Baidu rejected the one-time code. It may be expired, used, or from another application. Obtain a new code.",
+    "access_denied": "Authorization was denied. Confirm the application and requested permissions in the browser.",
+    "invalid_scope": "Baidu rejected the requested permissions. Check the application Netdisk access.",
+    "unsupported_grant_type": "Baidu rejected the authorization-code grant. Check the application OAuth configuration.",
+    "oauth_rejected": "Baidu rejected the exchange. No server description or credential is displayed.",
+    "network_failure": "The OAuth request failed at the network or TLS layer. No automatic code retry was made.",
+    "refresh_token_missing": "The response has no refresh token; no candidate credentials were saved.",
+    "netdisk_scope_missing": "The response does not grant Netdisk scope; no candidate credentials were saved.",
+    "invalid_response": "The OAuth response is incomplete or invalid; no candidate credentials were published.",
+    "existing_credentials": "Candidate credentials already exist. Inspect them before intentional replacement.",
+    "pending_recovery_required": "Pending credentials are retained. Recover them before another exchange.",
+    "local_configuration_error": "Private profile, ownership or permissions validation failed before exchange.",
+    "storage_failure": "Private credential publication failed. Preserve any pending authorization bundle and recover it.",
+    "recovery_failure": "Private authorization recovery failed. Existing pending material is retained.",
+}
+
+
+class AuthorizationFailure(RuntimeError):
+    def __init__(self, code, phase):
+        self.code = (
+            code
+            if isinstance(code, str) and code in _ERROR_MESSAGES
+            else "oauth_rejected"
+        )
+        self.phase = (
+            phase
+            if phase
+            in (
+                "input",
+                "preflight",
+                "exchange",
+                "validation",
+                "publication",
+                "recovery",
+            )
+            else "preflight"
+        )
+        super().__init__(_ERROR_MESSAGES[self.code])
+
+
+def _oauth_failure(response):
+    code = response.get("error") if isinstance(response, dict) else None
+    allowed = (
+        "invalid_client",
+        "invalid_grant",
+        "access_denied",
+        "invalid_scope",
+        "unsupported_grant_type",
+    )
+    return AuthorizationFailure(
+        code if isinstance(code, str) and code in allowed else "oauth_rejected",
+        "exchange",
+    )
+
+
+def _http_failure(error):
+    try:
+        response = json.loads(error.read(16384))
+    except Exception:
+        response = {}
+    finally:
+        error.close()
+    return _oauth_failure(response)
 
 
 def _profile(settings):
@@ -74,7 +148,10 @@ def authorization_url(app_key, state):
 
 def parse_authorization_code(value, state):
     try:
-        if not isinstance(value, str) or not value or len(value) > 8192:
+        if not isinstance(value, str):
+            raise ValueError()
+        value = value.strip()
+        if not value or len(value) > 8192:
             raise ValueError()
         if value.startswith("https://"):
             url = urllib.parse.urlsplit(value)
@@ -86,20 +163,31 @@ def parse_authorization_code(value, state):
                 or url.port
                 or url.fragment
             ):
-                raise ValueError()
+                raise AuthorizationFailure("unexpected_result_url", "input")
             fields = {}
             for key, item in urllib.parse.parse_qsl(url.query, strict_parsing=True):
                 if key in fields:
                     raise ValueError()
                 fields[key] = item
-            if fields.get("state") != state or "error" in fields:
-                raise ValueError()
+            if not fields.get("state"):
+                raise AuthorizationFailure("authorization_state_missing", "input")
+            if fields["state"] != state:
+                raise AuthorizationFailure("authorization_state_mismatch", "input")
+            if "error" in fields:
+                raise AuthorizationFailure("access_denied", "input")
             value = fields["code"]
-        if not re.fullmatch(r"[A-Za-z0-9._~-]{1,4096}", value):
+        # OAuth codes are opaque; form encoding handles +, / and = safely.
+        if (
+            not 1 <= len(value) <= 4096
+            or "://" in value
+            or any(not 0x21 <= ord(c) <= 0x7E for c in value)
+        ):
             raise ValueError()
         return value
+    except AuthorizationFailure:
+        raise
     except (ValueError, KeyError, TypeError):
-        raise RuntimeError("Invalid one-time code or authorization state") from None
+        raise AuthorizationFailure("invalid_code", "input") from None
 
 
 def _validate_bundle(bundle, settings):
@@ -136,11 +224,9 @@ def _preflight(settings, root, replace):
         if path.exists():
             read_private_json(path, root)
             if not replace:
-                raise RuntimeError(
-                    "Existing original-app credentials preserved; explicit replacement required"
-                )
+                raise AuthorizationFailure("existing_credentials", "preflight")
     if Path(settings["tokenFile"] + ".pending-refresh").exists():
-        raise RuntimeError("Resolve pending refresh before authorizing again")
+        raise AuthorizationFailure("pending_recovery_required", "preflight")
 
 
 def _publish(settings, bundle, root, *, replace):
@@ -158,6 +244,7 @@ def _publish(settings, bundle, root, *, replace):
 
 
 def exchange_app_authorization(settings, secret, code, *, request=None, replace=False):
+    phase = "preflight"
     try:
         root = _profile(settings)
         if (
@@ -165,14 +252,15 @@ def exchange_app_authorization(settings, secret, code, *, request=None, replace=
             or not secret
             or any(c.isspace() for c in secret)
         ):
-            raise RuntimeError("Application secret required")
+            raise AuthorizationFailure("secret_required", "preflight")
         code = parse_authorization_code(code, "local-oob-entry")
         with refresh_lock(settings):
             pending = Path(settings["tokenFile"] + ".pending-authorization")
             private_path(pending, root)
             if pending.exists() or pending.is_symlink():
-                raise RuntimeError("Pending authorization recovery required")
+                raise AuthorizationFailure("pending_recovery_required", "preflight")
             _preflight(settings, root, replace)
+            phase = "exchange"
             response = (request or request_refresh)(
                 {
                     "grant_type": "authorization_code",
@@ -182,10 +270,15 @@ def exchange_app_authorization(settings, secret, code, *, request=None, replace=
                     "redirect_uri": "oob",
                 }
             )
-            if not isinstance(response, dict) or "netdisk" not in re.split(
-                r"[,\s]+", str(response.get("scope", ""))
-            ):
-                raise RuntimeError("Netdisk scope required")
+            if isinstance(response, dict) and response.get("error"):
+                raise _oauth_failure(response)
+            phase = "validation"
+            if not isinstance(response, dict):
+                raise AuthorizationFailure("invalid_response", phase)
+            if not response.get("refresh_token"):
+                raise AuthorizationFailure("refresh_token_missing", phase)
+            if "netdisk" not in re.split(r"[,\s]+", str(response.get("scope", ""))):
+                raise AuthorizationFailure("netdisk_scope_missing", phase)
             bundle = {
                 "format": "baidu-mcp-linux-authorization-bundle-v1",
                 "app_key": settings["appKey"],
@@ -203,12 +296,31 @@ def exchange_app_authorization(settings, secret, code, *, request=None, replace=
                 },
             }
             _validate_bundle(bundle, settings)
+            phase = "publication"
             save_private_json(pending, bundle, root, replace=False)
             return _publish(settings, bundle, root, replace=replace)
+    except AuthorizationFailure:
+        raise
+    except urllib.error.HTTPError as error:
+        raise _http_failure(error) from None
+    except OSError:
+        code = (
+            "network_failure"
+            if phase == "exchange"
+            else "storage_failure"
+            if phase == "publication"
+            else "local_configuration_error"
+        )
+        raise AuthorizationFailure(code, phase) from None
     except Exception:
-        raise RuntimeError(
-            "Application authorization failed; no automatic retry. Inspect private profile and pending recovery, then verify application/code."
-        ) from None
+        code = (
+            "invalid_response"
+            if phase in ("exchange", "validation")
+            else "storage_failure"
+            if phase == "publication"
+            else "local_configuration_error"
+        )
+        raise AuthorizationFailure(code, phase) from None
 
 
 def recover_app_authorization(settings, *, replace=False):
@@ -219,7 +331,7 @@ def recover_app_authorization(settings, *, replace=False):
             bundle = read_private_json(pending, root)
             _preflight(settings, root, replace)
             return _publish(settings, bundle, root, replace=replace)
+    except AuthorizationFailure:
+        raise
     except Exception:
-        raise RuntimeError(
-            "Application authorization recovery failed; pending material retained where present"
-        ) from None
+        raise AuthorizationFailure("recovery_failure", "recovery") from None
