@@ -1,13 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { execFile, execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { promisify } from 'node:util';
 import { SessionRelay } from './session-relay.mjs';
+import { loadPlatformSettings, helperAsync, helperSync, authorizationUsable, assertForwardAuthorization } from './platform-config.mjs';
 
 const here=fileURLToPath(new URL('.',import.meta.url));
-const execute=promisify(execFile);
 let worker, stopping=false, timer, reconnectTimeout, polling=false;
 const safe=value=>String(value).replace(/access_token=[^\s&"'<>\\]+/gi,'access_token=[REDACTED]')
   .replace(/Bearer\s+[^\s"']+/gi,'Bearer [REDACTED]');
@@ -17,14 +15,10 @@ function stop(code=0) {
   process.stdin.destroy();
 }
 try {
-  const base=JSON.parse(readFileSync(join(here,'settings.json'),'utf8').replace(/^\uFEFF/,''));
-  const settings=JSON.parse(execFileSync(base.powershell,['-NoProfile','-NonInteractive','-File',join(here,'load-settings.ps1')],
-    {encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','pipe'],timeout:15000}));
+  const settings=loadPlatformSettings(here);
   async function ensure() {
-    const {stdout}=await execute(settings.powershell,['-NoProfile','-NonInteractive','-File',join(here,'ensure-authorization.ps1')],
-      {encoding:'utf8',windowsHide:true,timeout:95000});
-    const result=JSON.parse(stdout);
-    if (['expired','unknown'].includes(result.status)) {
+    const result=JSON.parse(await helperAsync(settings,here,'ensure'));
+    if (!authorizationUsable(result)) {
       const error=new Error('Unusable authorization'); error.code='authorization_expired'; throw error;
     }
     if (['failed','unavailable'].includes(result.refreshAction)) {
@@ -37,6 +31,10 @@ try {
   let nextCheck=Date.now()+(['failed','unavailable'].includes(current.refreshAction)?3600000:86400000);
   function emit(message) { process.stdout.write(safe(JSON.stringify(message))+'\n'); }
   const relay=new SessionRelay({send:message=>{
+    if (message.method && message.method !== 'notifications/cancelled') {
+      const observed=JSON.parse(helperSync(settings,here,'status'));
+      assertForwardAuthorization(observed,current);
+    }
     if (!worker?.stdin.writable) throw new Error('Connection unavailable');
     worker.stdin.write(JSON.stringify(message)+'\n');
   },emit,restart:()=>{
@@ -66,7 +64,18 @@ try {
   startWorker();
   const input=createInterface({input:process.stdin});
   input.on('line',line=>{
-    try {relay.fromHost(JSON.parse(line));}
+    try {
+      const message=JSON.parse(line);
+      const observed=JSON.parse(helperSync(settings,here,'status'));
+      if (!authorizationUsable(observed)) {
+        if (message.id !== undefined) emit({jsonrpc:'2.0',id:message.id,error:{code:-32000,message:'Authorization expired; reauthorize or restart.'}});
+        stop(1); return;
+      }
+      if (observed.revision !== revision) {
+        current={...current,...observed}; revision=observed.revision; relay.rotate();
+      }
+      relay.fromHost(message);
+    }
     catch { console.error('Baidu MCP request protocol failed.'); stop(1); }
   });
   input.on('close',()=>stop());
@@ -74,11 +83,12 @@ try {
   // File changes from the other MCP are adopted at the next minute poll.
   timer=setInterval(async()=>{
     if (polling || stopping) return;
-    let saved;
-    try {saved=JSON.parse(readFileSync(settings.tokenFile,'utf8').replace(/^\uFEFF/,''));}
-    catch {return;}
-    const changed=Date.parse(saved.saved_at_utc)!==Date.parse(revision);
-    if (!changed && Date.now()<nextCheck) return;
+    // Validate even an unchanged file; retain the refresh retry backoff.
+    try {
+      const observed=JSON.parse(helperSync(settings,here,'status'));
+      if (!authorizationUsable(observed)) throw new Error('Unusable authorization');
+      if (observed.revision === revision && Date.now()<nextCheck) return;
+    } catch {console.error('Baidu authorization unavailable; restart or reauthorize.');stop(1);return;}
     if (!relay.pause()) return;
     polling=true;
     try {
@@ -92,8 +102,7 @@ try {
     } catch (error) {
       if (stopping) return;
       console.error('Baidu authorization check failed; restart or reauthorize if expired.');
-      if (error.code==='authorization_expired') stop(1);
-      else {nextCheck=Date.now()+3600000; relay.resume();}
+      stop(1);
     } finally {polling=false;}
   },60000);
 } catch {

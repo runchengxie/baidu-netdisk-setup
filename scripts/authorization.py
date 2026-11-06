@@ -41,6 +41,13 @@ class AuthorizationProvider:
         self.check()
 
     def run(self, script, *args):
+        if self.settings.get('platform') == 'linux':
+            from linux_authorization import ensure_authorization, read_token
+            if script == 'ensure-authorization.ps1':
+                return json.dumps(ensure_authorization(self.settings))
+            if script == 'read-credential.ps1':
+                return read_token(self.settings)
+            raise RuntimeError('Unsupported Linux authorization operation')
         child = subprocess.run([self.settings['powershell'], '-NoProfile', '-NonInteractive',
                                 '-File', str(self.here / script), *args],
                                capture_output=True, text=True, encoding='utf-8', timeout=95,
@@ -57,6 +64,7 @@ class AuthorizationProvider:
 
     def check(self):
         with self.lock:
+            self.usable = False
             state = json.loads(self.run('ensure-authorization.ps1'))
             if state['status'] in ('expired', 'unknown'):
                 self.usable = False
@@ -88,6 +96,15 @@ class AuthorizationProvider:
     @contextlib.contextmanager
     def lease(self):
         with self.lock:
+            if self.settings.get('platform') == 'linux':
+                from linux_authorization import read_token
+                try:
+                    current = read_token(self.settings)
+                    if current != self.token:
+                        self.check()
+                except Exception:
+                    self.usable = False
+                    raise RuntimeError('Authorization unavailable; check permissions or reauthorize') from None
             if time.monotonic() >= self.next_check or self.file_stamp() != self.stamp:
                 self.check()
             if not self.usable:

@@ -25,7 +25,7 @@ try {
             if ($state -eq 'expiring') { [Console]::Error.WriteLine('Baidu authorization expires within 7 days. Reauthorize soon.') }
             [Console]::Out.Write($token)
         } else {
-            $result = [ordered]@{ status = $state; expiresAtUtc = $(if ($expires) { $expires.UtcDateTime.ToString('o') } else { $null }); hasRefreshToken = [bool]$saved.refresh_token; automaticRefresh = $false; decryptable = $true }
+            $result = [ordered]@{ revision = $(if ($created) { $created.UtcDateTime.ToString('o') } else { 'unknown' }); status = $state; expiresAtUtc = $(if ($expires) { $expires.UtcDateTime.ToString('o') } else { $null }); hasRefreshToken = [bool]$saved.refresh_token; automaticRefresh = $false; decryptable = $true }
             $refresh=Get-BaiduRefreshStatus -Settings $settings -HasRefreshToken ([bool]$saved.refresh_token)
             foreach($key in $refresh.Keys) { $result[$key]=$refresh[$key] }
             if ($Online) {

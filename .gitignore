@@ -10,3 +10,5 @@ app-secret.json
 settings.json
 runtime/
 test-results/
+
+.superpowers/

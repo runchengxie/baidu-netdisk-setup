@@ -1,19 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
+import { loadPlatformSettings, helperSync } from './platform-config.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 try {
-  const base = JSON.parse(readFileSync(join(here, 'settings.json'), 'utf8').replace(/^\uFEFF/, ''));
-  const settings = JSON.parse(execFileSync(base.powershell, ['-NoProfile', '-NonInteractive', '-File',
-    join(here, 'load-settings.ps1')], { encoding: 'utf8', windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }));
+  const settings = loadPlatformSettings(here);
   const tokenFile = settings.tokenFile;
-  const token = execFileSync(settings.powershell, ['-NoProfile', '-NonInteractive', '-File',
-    join(here, 'read-credential.ps1'), '-TokenFile', tokenFile, '-Mode', 'token'], {
-    encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000,
-  }).trim();
+  const token = helperSync(settings, here, 'token');
   if (!token) throw new Error('Empty credential');
   const safe = value => String(value).replaceAll(token, '[REDACTED]')
     .replace(/access_token=[^\s&"'<>\\]+/gi, 'access_token=[REDACTED]');

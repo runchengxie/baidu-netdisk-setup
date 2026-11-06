@@ -14,12 +14,17 @@ from authorization import AuthorizationProvider, install_log_redaction
 def main():
     here = Path(__file__).resolve().parent
     base = json.loads((here / 'settings.json').read_text(encoding='utf-8-sig'))
-    loaded = subprocess.run([base['powershell'], '-NoProfile', '-NonInteractive', '-File',
-                             str(here / 'load-settings.ps1')], capture_output=True, text=True,
-                            encoding='utf-8', timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
-    if loaded.returncode:
-        raise RuntimeError('Configuration unavailable')
-    settings = json.loads(loaded.stdout)
+    if base.get('platform') == 'linux':
+        from linux_config import load_settings
+        settings = load_settings(here / 'settings.json')
+    else:
+        loaded = subprocess.run([base['powershell'], '-NoProfile', '-NonInteractive', '-File',
+                                 str(here / 'load-settings.ps1')], capture_output=True, text=True,
+                                encoding='utf-8', timeout=15,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if loaded.returncode:
+            raise RuntimeError('Configuration unavailable')
+        settings = json.loads(loaded.stdout)
     authorization = AuthorizationProvider(here, settings)
     install_log_redaction(authorization)
 
