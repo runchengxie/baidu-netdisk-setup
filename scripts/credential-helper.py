@@ -7,14 +7,16 @@ import json
 from pathlib import Path
 import sys
 import warnings
+import secrets
 
-from linux_config import load_settings, save_private_json
+from linux_config import load_settings
 from linux_authorization import (
     ensure_authorization,
     read_token,
     save_authorization,
     authorization_state,
     parse_authorization_result,
+    save_application_secret,
 )
 
 
@@ -25,7 +27,20 @@ def main(argv=None):
     )
     parser.add_argument(
         "command",
-        choices=("settings", "ensure", "status", "token", "save", "save-secret"),
+        choices=(
+            "settings",
+            "ensure",
+            "status",
+            "token",
+            "save",
+            "save-secret",
+            "prepare-app",
+            "authorize-app",
+            "recover-app",
+        ),
+    )
+    parser.add_argument(
+        "--app-key", help="Non-secret original application AppKey; prepare-app only"
     )
     parser.add_argument("--replace", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -62,6 +77,57 @@ def main(argv=None):
                 )
             save_authorization(settings, access, refresh, expires, replace=args.replace)
             print("Authorization saved privately. Run the read-only MCP checks next.")
+        elif args.command in ("prepare-app", "authorize-app", "recover-app"):
+            from linux_app_authorization import (
+                prepare_app_profile,
+                authorization_url,
+                parse_authorization_code,
+                exchange_app_authorization,
+                recover_app_authorization,
+            )
+
+            if args.command == "prepare-app":
+                prepare_app_profile(settings, args.app_key)
+                print(
+                    json.dumps(
+                        {
+                            "status": "profile_prepared",
+                            "settingsFile": str(
+                                Path(settings["deploymentRoot"])
+                                / "original-app-settings.json"
+                            ),
+                            "defaultChanged": False,
+                        }
+                    )
+                )
+            elif args.command == "recover-app":
+                print(
+                    json.dumps(
+                        recover_app_authorization(settings, replace=args.replace)
+                    )
+                )
+            else:
+                if not sys.stdin.isatty():
+                    raise RuntimeError(
+                        "Use interactive hidden application authorization"
+                    )
+                secret = getpass.getpass("Original application SecretKey (hidden): ")
+                state = secrets.token_urlsafe(32)
+                print(
+                    "Open this official URL in your browser, confirm the original application and permissions:"
+                )
+                print(authorization_url(settings["appKey"], state))
+                code = getpass.getpass(
+                    "Fresh code from the OOB page, or complete official result URL (hidden): "
+                )
+                code = parse_authorization_code(code, state)
+                print(
+                    json.dumps(
+                        exchange_app_authorization(
+                            settings, secret, code, replace=args.replace
+                        )
+                    )
+                )
         else:
             if not sys.stdin.isatty() or not settings.get("appKey"):
                 raise RuntimeError(
@@ -70,16 +136,7 @@ def main(argv=None):
             secret = getpass.getpass("Application SecretKey (hidden): ")
             if not secret:
                 raise RuntimeError("Empty application secret")
-            save_private_json(
-                Path(settings["secretFile"]),
-                {
-                    "format": "baidu-mcp-linux-secret-v1",
-                    "app_key": settings["appKey"],
-                    "secret_key": secret,
-                },
-                Path(settings["deploymentRoot"]),
-                replace=args.replace,
-            )
+            save_application_secret(settings, secret, replace=args.replace)
             print("Application secret saved privately.")
         return 0
     except Exception:

@@ -7,7 +7,7 @@ const execute = promisify(execFile);
 
 export function helperCommand(settings, here, command) {
   if (settings.platform === 'linux') {
-    return [settings.python, [join(here, 'credential-helper.py'), '--settings', join(here, 'settings.json'), command]];
+    return [settings.python, [join(here, 'credential-helper.py'), '--settings', settings.settingsFile || join(here, 'settings.json'), command]];
   }
   const scripts = { settings: 'load-settings.ps1', ensure: 'ensure-authorization.ps1', token: 'read-credential.ps1', status: 'read-credential.ps1' };
   if (!scripts[command]) throw new Error('Unknown helper operation');
@@ -29,8 +29,11 @@ export async function helperAsync(settings, here, command) {
 }
 
 export function loadPlatformSettings(here) {
-  const base = JSON.parse(readFileSync(join(here, 'settings.json'), 'utf8').replace(/^\uFEFF/, ''));
-  return JSON.parse(helperSync(base, here, 'settings'));
+  const settingsFile = process.env.BAIDU_MCP_SETTINGS_FILE || join(here, 'settings.json');
+  const base = JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^\uFEFF/, ''));
+  if (settingsFile !== join(here, 'settings.json') && base.platform !== 'linux') throw new Error('Alternate settings require Linux');
+  const loaded = JSON.parse(helperSync({...base, settingsFile}, here, 'settings'));
+  return base.platform === 'linux' ? {...loaded, settingsFile} : loaded;
 }
 
 export function authorizationUsable(state, now = Date.now()) {

@@ -36,3 +36,12 @@ test('queued calls are rechecked when the relay flushes after expiration', async
   assert.throws(()=>relay.resume(),/expired/);
   assert.equal(sent.length,0);
 });
+
+test('selected private profile is propagated to every Python helper command', () => {
+  const settings={platform:'linux',python:'/runtime/python',settingsFile:'/private/original-app-settings.json'};
+  for (const command of ['settings','ensure','status','token']) {
+    const [program,args]=helperCommand(settings,'/private',command);
+    assert.equal(program,'/runtime/python');
+    assert.deepEqual(args,['/private/credential-helper.py','--settings','/private/original-app-settings.json',command]);
+  }
+});

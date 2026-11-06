@@ -14,7 +14,9 @@ from linux_config import save_private_json
 from linux_authorization import save_authorization
 
 
-@unittest.skipUnless(sys.platform == "linux" and shutil.which("node"), "Linux and Node required")
+@unittest.skipUnless(
+    sys.platform == "linux" and shutil.which("node"), "Linux and Node required"
+)
 class RemoteLinuxTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -103,3 +105,68 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{fixture:true}
         out, err = self.process.communicate(timeout=5)
         self.assertNotIn("artificial-remote-secret", out + err)
         self.assertIn("[REDACTED]", err)
+
+    def test_selected_candidate_profile_reaches_remote_worker_without_touching_default(
+        self,
+    ):
+        self.stop()
+        candidate = {
+            **self.settings,
+            "tokenFile": str(self.root / "candidate-token.json"),
+            "secretFile": str(self.root / "candidate-secret.json"),
+        }
+        save_private_json(self.root / "candidate-settings.json", candidate, self.root)
+        save_authorization(
+            candidate,
+            "synthetic-candidate-secret",
+            "",
+            2592000,
+            now=datetime.now(timezone.utc),
+        )
+        Path(self.settings["tokenFile"]).write_text(
+            "default-preserved-malformed-fixture"
+        )
+        bridge = self.root / "fake-bridge.mjs"
+        bridge.write_text(
+            bridge.read_text().replace(
+                "result:{fixture:true}",
+                "result:{fixture:true,candidate:token==='synthetic-candidate-secret'}",
+            )
+        )
+        self.process = subprocess.Popen(
+            ["node", str(self.root / "start-remote.mjs")],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={
+                **os.environ,
+                "BAIDU_MCP_SETTINGS_FILE": str(self.root / "candidate-settings.json"),
+            },
+        )
+        response = self.call(2, "initialize")
+        self.assertTrue(response.get("result", {}).get("candidate"))
+        self.assertEqual(
+            Path(self.settings["tokenFile"]).read_text(),
+            "default-preserved-malformed-fixture",
+        )
+
+    def test_local_launcher_selects_private_candidate_settings(self):
+        import importlib.util
+        from unittest.mock import patch
+
+        source = Path(__file__).resolve().parents[1] / "scripts" / "start-local.py"
+        spec = importlib.util.spec_from_file_location("local_launcher", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        candidate = {
+            **self.settings,
+            "tokenFile": str(self.root / "candidate-token.json"),
+        }
+        save_private_json(self.root / "candidate-settings.json", candidate, self.root)
+        with patch.dict(
+            os.environ,
+            {"BAIDU_MCP_SETTINGS_FILE": str(self.root / "candidate-settings.json")},
+        ):
+            settings = module.load_launcher_settings(self.root)
+        self.assertEqual(settings["tokenFile"], str(self.root / "candidate-token.json"))

@@ -65,3 +65,39 @@ python3 -m compileall -q scripts
 ```
 
 Linux tests use synthetic tokens and no cloud writes. Windows-only tests skip on Linux; run them on Windows before claiming that platform is reverified. Temporary permission tests need a filesystem enforcing POSIX modes and paths outside Git ancestors. The Linux change adds permission/expiry/refresh/provider/installer coverage, while preserving the existing request-rotation and upload-conflict tests. Historical Windows integration results remain in [verification.md](verification.md), not relabeled as Linux results. Host installation, registration, authenticated initialization and a successful root listing are distinct stages; report each separately.
+
+## Restore automatic refresh for an existing application
+
+A working refresh implementation does not make an implicit experience token refreshable. The original application's AppKey, matching SecretKey and a fresh authorization-code exchange provide a separate access/refresh pair. This route avoids trying to decrypt a migrated Windows DPAPI file on Linux. The application owner must obtain its SecretKey through the developer console; never send it or an authorization code to chat. The [official OAuth guide](https://openauth.baidu.com/doc/doc.html) describes code exchange and refresh requirements.
+
+Create an isolated profile with the original application's non-secret AppKey:
+
+```bash
+python3 "$deployment/credential-helper.py" prepare-app --app-key '<original application AppKey>'
+python3 "$deployment/credential-helper.py" \
+  --settings "$deployment/original-app-settings.json" authorize-app
+```
+
+The second command requires a terminal. Enter the SecretKey at the hidden prompt, open the displayed official authorization URL, confirm the original application and its permissions, then enter the fresh code shown by the OOB page at the next hidden prompt. Codes are single-use and short-lived. A complete official result URL is also accepted when its state matches the displayed request. The access token, refresh token and SecretKey are stored privately in `original-app-authorization.json` and `original-app-secret.json`; the experience files and default Codex registrations are preserved. A successful exchange must include netdisk scope and a refresh token. Errors are sanitized and the command never retries a code automatically.
+
+If publication is interrupted, a private `.pending-authorization` bundle retains both new authorization and secret. Preserve it. The candidate cannot be used or exchanged again until recovery. Run the following local recovery command only for that intentionally selected profile; it does not make another OAuth request:
+
+```bash
+python3 "$deployment/credential-helper.py" \
+  --settings "$deployment/original-app-settings.json" recover-app --replace
+```
+
+Existing candidate credentials require `authorize-app --replace` for intentional reauthorization. Recovery cannot retrieve credentials that the filesystem could not persist at all; if exchange succeeded but no bundle could be saved, obtain a new code rather than replaying the used one.
+
+Verify the separate candidate without changing default registrations:
+
+```bash
+BAIDU_MCP_SETTINGS_FILE="$deployment/original-app-settings.json" \
+  "$python_path" "$deployment/check-mcp.py"
+python3 "$deployment/credential-helper.py" \
+  --settings "$deployment/original-app-settings.json" ensure --force
+```
+
+The first command initializes both installed MCPs and reads the root directory. The second deliberately performs a real OAuth refresh and privately publishes the returned token pair; run it only after the new application authorization exists. Repeat the read-only check after refreshing to establish that the returned authorization works. These checks perform no cloud-file writes. The selected settings path is non-secret and reaches Python helpers and Node workers through the child environment.
+
+Keep validation results separate from the original Windows evidence. Historical records reported `invalid app` for sharing with the original application, while experience sharing worked; successful root listing/refresh does not prove sharing or upload equivalence. Do not silently replace the experience profile or register additional default routes. Decide any promotion after account/permission checks and explicit selection of the intended default.

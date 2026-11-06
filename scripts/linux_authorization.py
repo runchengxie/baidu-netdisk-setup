@@ -52,6 +52,9 @@ def expiry(saved, now):
 
 
 def _saved(settings):
+    pending = Path(settings["tokenFile"] + ".pending-authorization")
+    if pending.exists() or pending.is_symlink():
+        raise RuntimeError("Pending application authorization recovery required")
     value = read_private_json(
         Path(settings["tokenFile"]), Path(settings["deploymentRoot"])
     )
@@ -100,6 +103,7 @@ def save_authorization(settings, access, refresh, expires, *, now=None, replace=
     if expiry(value, now)["status"] in ("unknown", "expired"):
         raise RuntimeError("Invalid authorization expiry")
     with refresh_lock(settings):
+        assert_no_pending(settings)
         save_private_json(
             Path(settings["tokenFile"]),
             value,
@@ -108,9 +112,43 @@ def save_authorization(settings, access, refresh, expires, *, now=None, replace=
         )
 
 
+def assert_no_pending(settings):
+    root = Path(settings["deploymentRoot"])
+    for suffix in (".pending-authorization", ".pending-refresh"):
+        path = private_path(Path(settings["tokenFile"] + suffix), root)
+        if path.exists() or path.is_symlink():
+            raise RuntimeError("Pending credential recovery must be resolved first")
+
+
+def save_application_secret(settings, secret, *, replace=False):
+    if not isinstance(settings.get("appKey"), str) or not settings["appKey"]:
+        raise RuntimeError("Matching application AppKey required")
+    if not isinstance(secret, str) or not secret or any(c.isspace() for c in secret):
+        raise RuntimeError("Application secret required")
+    root = Path(settings["deploymentRoot"])
+    with refresh_lock(settings):
+        assert_no_pending(settings)
+        path = Path(settings["secretFile"])
+        if path.exists():
+            saved = read_private_json(path, root)
+            if saved.get("app_key") != settings["appKey"]:
+                raise RuntimeError("Existing secret belongs to another application")
+        save_private_json(
+            path,
+            {
+                "format": "baidu-mcp-linux-secret-v1",
+                "app_key": settings["appKey"],
+                "secret_key": secret,
+            },
+            root,
+            replace=replace,
+        )
+
+
 @contextmanager
 def refresh_lock(settings, *, timeout=45):
     import fcntl
+
     root = Path(settings["deploymentRoot"])
     path = private_path(Path(settings["tokenFile"] + ".refresh.lock"), root)
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -158,21 +196,6 @@ def ensure_authorization(settings, *, now=None, force=False, request=None):
     if result["remainingSeconds"] > 604800 and not force:
         return result
     root = Path(settings["deploymentRoot"])
-    try:
-        secret = read_private_json(Path(settings["secretFile"]), root)
-        if (
-            secret.get("format") != "baidu-mcp-linux-secret-v1"
-            or not settings.get("appKey")
-            or secret.get("app_key") != settings["appKey"]
-            or not secret.get("secret_key")
-            or not saved.get("refresh_token")
-        ):
-            raise RuntimeError("Missing refresh materials")
-    except (OSError, RuntimeError, ValueError, AttributeError):
-        result.update(
-            refreshAction="unavailable", refreshFailure="refresh_materials_unavailable"
-        )
-        return result
     with refresh_lock(settings):
         latest = _saved(settings)
         if latest["saved_at_utc"] != saved["saved_at_utc"]:
@@ -184,6 +207,22 @@ def ensure_authorization(settings, *, now=None, force=False, request=None):
                 "refreshAction": "failed",
                 "refreshFailure": "pending_credentials_recovery_required",
             }
+        try:
+            secret = read_private_json(Path(settings["secretFile"]), root)
+            if (
+                secret.get("format") != "baidu-mcp-linux-secret-v1"
+                or not settings.get("appKey")
+                or secret.get("app_key") != settings["appKey"]
+                or not secret.get("secret_key")
+                or not saved.get("refresh_token")
+            ):
+                raise RuntimeError("Missing refresh materials")
+        except (OSError, RuntimeError, ValueError, AttributeError):
+            result.update(
+                refreshAction="unavailable",
+                refreshFailure="refresh_materials_unavailable",
+            )
+            return result
         try:
             response = (request or request_refresh)(
                 {

@@ -65,3 +65,39 @@ python3 -m compileall -q scripts
 ```
 
 Linux 测试使用合成令牌，不写网盘。Windows 专用测试在 Linux 上跳过；若要宣称 Windows 重新验证通过，应在 Windows 上运行。权限测试需要支持 POSIX 权限、且祖先目录不在 Git 仓库中的临时位置。新增覆盖权限、有效期、刷新、提供器及安装器，同时保留原有连接轮换和上传冲突测试。历史 Windows 实测仍在 [verification.md](verification.md)，不会改称 Linux 实测。应分别报告本机安装、登记、授权初始化、根目录读取四个阶段。
+
+## 恢复已有应用的自动刷新
+
+刷新代码已经实现，并不意味着刚取得的体验访问令牌可以刷新。原应用的 AppKey、对应 SecretKey 和一次新的授权码交换，可以取得独立的访问令牌及刷新令牌，不需要在 Linux 上解密迁移来的 Windows DPAPI 文件。由应用所有者到开发者控制台取得 SecretKey，不要把密钥或授权码发到聊天里。授权码交换及刷新条件见[百度官方 OAuth 指南](https://openauth.baidu.com/doc/doc.html)。
+
+先使用原应用的非秘密 AppKey 创建独立配置：
+
+```bash
+python3 "$deployment/credential-helper.py" prepare-app --app-key '<原应用 AppKey>'
+python3 "$deployment/credential-helper.py" \
+  --settings "$deployment/original-app-settings.json" authorize-app
+```
+
+第二条必须在真实终端运行。在隐藏提示输入 SecretKey，打开程序显示的官方授权网址，核对原应用及权限后，将 OOB 页面显示的新授权码粘贴到下一个隐藏提示。授权码只能用一次，且有效期很短。也可粘贴包含匹配 state 的完整官方返回网址。访问令牌、刷新令牌和密钥分别保存在私有的 `original-app-authorization.json`、`original-app-secret.json`；现有体验文件及 Codex 默认登记不变。交换结果必须包含网盘权限和刷新令牌。失败信息会脱敏，程序不会自动重试授权码。
+
+若保存过程中断，私有 `.pending-authorization` 文件保留完整的新令牌及密钥。应保留它；恢复前，该候选授权不能使用或再次交换。确认选中的是这套候选配置后，运行下面的本机恢复命令，不会再次请求 OAuth：
+
+```bash
+python3 "$deployment/credential-helper.py" \
+  --settings "$deployment/original-app-settings.json" recover-app --replace
+```
+
+已有候选凭据默认保留，只有明确使用 `authorize-app --replace` 才重新授权。如果文件系统连完整恢复文件都没能写入，程序无法找回内存中已丢失的令牌；此时应取得新授权码，不能重放已使用的码。
+
+不改变默认登记，也能单独验证候选配置：
+
+```bash
+BAIDU_MCP_SETTINGS_FILE="$deployment/original-app-settings.json" \
+  "$python_path" "$deployment/check-mcp.py"
+python3 "$deployment/credential-helper.py" \
+  --settings "$deployment/original-app-settings.json" ensure --force
+```
+
+第一条初始化两个已部署 MCP，并只读网盘根目录。第二条会明确进行一次真实 OAuth 刷新，并私下保存返回的新令牌对，必须在新应用授权保存后才运行。刷新后再执行一次只读检查，确认新令牌可用。这些操作不写入网盘文件。选择配置的环境变量只包含非秘密路径，并传递给 Python 帮助程序和 Node 工作进程。
+
+应把本次 Linux 结果与历史 Windows 证据分开记录。旧记录中，原应用的分享曾返回 `invalid app`，体验应用的分享可用；根目录读取或刷新成功不能证明分享、上传能力完全相同。不会悄悄替换体验配置或新增默认连接。账户和权限检查完成后，再明确选择是否调整默认用途。

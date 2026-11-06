@@ -1,6 +1,6 @@
 # Baidu Netdisk Setup
 
-This repository contains Windows setup helpers and documentation for the official Baidu Netdisk MCP. It is an independent project.
+This repository contains Windows and headless Linux setup helpers and documentation for the official Baidu Netdisk MCP. It is an independent project.
 
 - Keep credentials, private configuration, downloaded SDKs, generated inventories and test artifacts outside this repository.
 - Resolve machine roots from an explicitly supplied workspace TOML or command parameters. Do not put personal absolute paths in shared scripts.

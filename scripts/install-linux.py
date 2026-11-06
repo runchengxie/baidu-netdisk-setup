@@ -18,6 +18,7 @@ FILES = (
     "authorization.py",
     "linux_config.py",
     "linux_authorization.py",
+    "linux_app_authorization.py",
     "credential-helper.py",
     "platform-config.mjs",
     "session-relay.mjs",
