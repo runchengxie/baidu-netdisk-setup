@@ -33,6 +33,45 @@ def run(argv, **kwargs):
     return subprocess.run([str(v) for v in argv], check=True, **kwargs)
 
 
+def verify_official_checkout(official, revision):
+    head = run(
+        ["git", "-C", official, "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    if head != revision:
+        raise RuntimeError(
+            "Pinned official revision mismatch; existing checkout preserved"
+        )
+    changes = run(
+        [
+            "git",
+            "-C",
+            official,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=no",
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout
+    for record in changes.split("\0"):
+        if not record:
+            continue
+        path = Path(record[3:])
+        # This revision tracks generated caches. The Linux launcher selects an
+        # external pycache prefix, so it never loads these tracked cache files.
+        if (
+            record[:2] not in (" M", "M ", "MM")
+            or "__pycache__" not in path.parts
+            or path.suffix != ".pyc"
+            or not (Path(official) / path).is_file()
+            or (Path(official) / path).is_symlink()
+        ):
+            raise RuntimeError(
+                "Official source modifications preserved; refusing installation"
+            )
+
+
 def _no_source_or_links(path):
     path = Path(path)
     if not path.is_absolute() or ".." in path.parts:
@@ -128,21 +167,7 @@ def prepare(roots, *, prepare_only=False, skip_registration=False):
             ]
         )
         run(["git", "-C", official, "checkout", "--detach", REVISION])
-    head = run(
-        ["git", "-C", official, "rev-parse", "HEAD"], capture_output=True, text=True
-    ).stdout.strip()
-    if head != REVISION:
-        raise RuntimeError(
-            "Pinned official revision mismatch; existing checkout preserved"
-        )
-    if run(
-        ["git", "-C", official, "status", "--porcelain", "--untracked-files=no"],
-        capture_output=True,
-        text=True,
-    ).stdout.strip():
-        raise RuntimeError(
-            "Official source modifications preserved; refusing installation"
-        )
+    verify_official_checkout(official, REVISION)
     run(
         [
             "npm",

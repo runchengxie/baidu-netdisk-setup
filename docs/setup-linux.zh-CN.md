@@ -17,6 +17,8 @@ python3 scripts/install-linux.py --workspace-config "$CONFIG_ROOT/shared/workspa
 
 第一条只准备启动程序和私有设置，不下载依赖、不登记 MCP。第二条安装固定版本依赖，仍不登记。检查完成后，不带这两个开关运行即可登记两条连接。未知部署、符号链接、错误或被修改的上游版本及不匹配的根目录会导致停止；保留已有凭据及历史 Windows 运行目录。
 
+固定的上游版本跟踪了生成的字节码。安装器仅允许 `__pycache__` 中普通 `.pyc` 缓存的修改；真实源码变化或版本不符仍会停止安装。Linux 上传端使用运行目录中的独立字节码缓存，不读取或改写上游跟踪的缓存。
+
 依赖放在 `DATA_ROOT/baidu-netdisk-mcp/runtime/linux`，启动程序和私有设置放在 `CONFIG_ROOT/deployments/baidu-netdisk-mcp`。登记使用稳定部署路径，不引用任务工作树。设置记录 Linux 的 `.venv/bin/python`。
 
 ## 私下保存授权

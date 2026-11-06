@@ -40,9 +40,24 @@ def load_launcher_settings(here):
     return json.loads(loaded.stdout)
 
 
+def configure_bytecode_cache(settings):
+    if settings.get("platform") != "linux":
+        return
+    data_root = Path(settings["dataRoot"])
+    if not data_root.is_absolute() or ".." in data_root.parts:
+        raise RuntimeError("Absolute data root required for bytecode cache")
+    cache = data_root / "baidu-netdisk-mcp" / "runtime" / "linux" / "pycache"
+    for parent in (cache, *cache.parents):
+        if parent.is_symlink() or (parent / ".git").exists() and parent != Path.home():
+            raise RuntimeError("Bytecode cache must be outside source and symlinks")
+    cache.mkdir(parents=True, exist_ok=True)
+    sys.pycache_prefix = str(cache)
+
+
 def main():
     here = Path(__file__).resolve().parent
     settings = load_launcher_settings(here)
+    configure_bytecode_cache(settings)
     authorization = AuthorizationProvider(here, settings)
     install_log_redaction(authorization)
 
